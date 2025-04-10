@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH -J lab3_single
+#SBATCH --partition ice-cpu,coc-cpu
+#SBATCH -C "intel&core24"
+#SBATCH -N 1 --ntasks-per-node=16
+#SBATCH --mem-per-cpu=1G
+#SBATCH --time=00:20:00
+#SBATCH --error=job.%J.err
+#SBATCH --output=job.%J.out
+
+#Setup Environment
+cd $SLURM_SUBMIT_DIR
+source pace_env.sh
+
+make teragen terametrics
+
+if [ ! -e data_bench.dat ]
+then
+    echo "* Creating datafile"
+    mpirun -np 1 ./teragen -c 160000 -f data_bench.dat
+    sleep 10
+else
+    echo "* Reusing existing data file"
+fi
+
+mpirun ./terametrics -f data_bench.dat -c 20
+
+exit 0

@@ -1,0 +1,6 @@
+NAME:compare_2
+BINARY:autograder/compare.sh
+POINTVAL:10
+TYPE:internal
+INPUT:autograder/dat002.student autograder/dat002.ref
+OUTPUT:

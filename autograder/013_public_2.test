@@ -1,0 +1,6 @@
+NAME:public_2
+BINARY:
+POINTVAL:0
+TYPE:mpi
+INPUT:-np 3 ./terasort -f autograder/dat002.student
+OUTPUT:

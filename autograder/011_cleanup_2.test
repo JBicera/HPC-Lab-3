@@ -1,0 +1,6 @@
+NAME:cleanup_public_2
+BINARY:autograder/cleanup.sh
+POINTVAL:0
+TYPE:internal
+INPUT:autograder/dat002.student
+OUTPUT:
