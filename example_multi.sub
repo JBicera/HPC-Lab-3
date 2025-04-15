@@ -17,7 +17,7 @@ make teragen terametrics
 if [ ! -e data_bench.dat ]
 then
     echo "* Creating datafile"
-    mpirun -np 1 ./teragen -c 640000 -f data_bench.dat
+    mpirun -np 1 ./teragen -c 16000000 -f data_bench.dat
     sleep 10
 else
     echo "* Reusing existing data file"
