@@ -48,6 +48,7 @@ void terasort(terarec_t *local_data, int local_len,
 
     // 6. Partition local data using splitters
     int *sendCount = calloc(P, sizeof(int));  // Count of elements to send to each process
+    int *bucketIndices = malloc(local_len * sizeof(int)); // Keep track of bucket indicies for each record
 
     // Count how many items go in each bucket
     for (int i = 0; i < local_len; i++) 
@@ -55,6 +56,7 @@ void terasort(terarec_t *local_data, int local_len,
         int bucket = 0;
         while (bucket < P - 1 && teraCompare(&local_data[i], &splitters[bucket]) > 0)
             bucket++;
+        bucketIndices[i] = bucket;
         sendCount[bucket]++;
     }
 
@@ -71,9 +73,7 @@ void terasort(terarec_t *local_data, int local_len,
     // Copy data to send buffer
     for (int i = 0; i < local_len; i++) 
     {
-        int bucket = 0;
-        while (bucket < P - 1 && teraCompare(&local_data[i], &splitters[bucket]) > 0)
-            bucket++;
+        int bucket = bucketIndices[i];
         int pos = sendDispl[bucket] + tempCounts[bucket]++;
         sendBuff[pos] = local_data[i];
     }
@@ -87,14 +87,14 @@ void terasort(terarec_t *local_data, int local_len,
 
     int *recvDispl = malloc(P * sizeof(int));
     recvDispl[0] = 0;
-    int total_recv = recvCounts[0];
+    int totalRecv = recvCounts[0];
     for (int i = 1; i < P; i++) 
     {
         recvDispl[i] = recvDispl[i - 1] + recvCounts[i - 1];
-        total_recv += recvCounts[i];
+        totalRecv += recvCounts[i];
     }
 
-    terarec_t *recvBuff = malloc(total_recv * sizeof(terarec_t));
+    terarec_t *recvBuff = malloc(totalRecv * sizeof(terarec_t));
     MPI_Alltoallv(sendBuff, sendCount, sendDispl, mpi_tera_type,
                   recvBuff, recvCounts, recvDispl, mpi_tera_type,
                   MPI_COMM_WORLD);
@@ -105,13 +105,13 @@ void terasort(terarec_t *local_data, int local_len,
     free(recvDispl);
 
     // 8. Final local sort
-    qsort(recvBuff, total_recv, sizeof(terarec_t), teraCompare);
+    qsort(recvBuff, totalRecv, sizeof(terarec_t), teraCompare);
     *sortedData = recvBuff; // Return values
-    int my_count = total_recv;
-    MPI_Allgather(&my_count, 1, MPI_INT, sorted_counts, 1, MPI_INT, MPI_COMM_WORLD);
+    int count = totalRecv;
+    MPI_Allgather(&count, 1, MPI_INT, sorted_counts, 1, MPI_INT, MPI_COMM_WORLD);
 
+    // Compute displacements for the global sorted array
     sorted_displs[0] = 0;
-    for (int i = 1; i < P; i++) {
+    for (int i = 1; i < P; i++)
         sorted_displs[i] = sorted_displs[i - 1] + sorted_counts[i - 1];
-    }
 }
