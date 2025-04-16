@@ -14,7 +14,7 @@ void terasort(terarec_t *local_data, int local_len,
     qsort(local_data, local_len, sizeof(terarec_t), teraCompare);
 
     // 2. Select P-1 samples from local sorted data
-    int numSamples = P - 1;
+    int numSamples = 2*(P-1);
     terarec_t *localSamples = malloc(numSamples * sizeof(terarec_t)); // Store samples
     for (int i = 0; i < numSamples; i++) 
     {
