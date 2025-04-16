@@ -106,9 +106,7 @@ void terasort(terarec_t *local_data, int local_len,
 
     // 8. Final local sort
     qsort(recvBuff, total_recv, sizeof(terarec_t), teraCompare);
-
     *sortedData = recvBuff; // Return values
-
     int my_count = total_recv;
     MPI_Allgather(&my_count, 1, MPI_INT, sorted_counts, 1, MPI_INT, MPI_COMM_WORLD);
 
