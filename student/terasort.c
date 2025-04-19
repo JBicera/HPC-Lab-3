@@ -2,7 +2,36 @@
 #include <stdio.h>
 #include <string.h>
 #include <mpi.h>
-#include "terarec.h"  // Provides terarec_t, teraCompare(), mpi_tera_type, etc.
+#include "terarec.h"  // Provides terarec_t, teraCompare(), mpi_tera_type, and TERA_KEY_LEN
+
+// Helper: stable counting sort by one key byte
+static void countingSort(terarec_t *data, int len, int bytePos) {
+    int count[256] = {0};
+    terarec_t *output = malloc(len * sizeof(terarec_t));
+    // Count occurrences
+    for (int i = 0; i < len; i++) {
+        unsigned char c = data[i].key[bytePos];
+        count[c]++;
+    }
+    // Prefix sums
+    for (int i = 1; i < 256; i++) count[i] += count[i-1];
+    // Build output stable
+    for (int i = len - 1; i >= 0; i--) {
+        unsigned char c = data[i].key[bytePos];
+        output[--count[c]] = data[i];
+    }
+    // Copy back
+    memcpy(data, output, len * sizeof(terarec_t));
+    free(output);
+}
+
+// Radix sort for fixed-length string key
+static void radixSortRecords(terarec_t *data, int len) {
+    // LSD radix: last byte to first
+    for (int pos = TERA_KEY_LEN - 1; pos >= 0; pos--) {
+        countingSort(data, len, pos);
+    }
+}
 
 void terasort(terarec_t *local_data, int local_len,
               terarec_t **sortedData, int* sorted_counts, long* sorted_displs) {
@@ -10,47 +39,50 @@ void terasort(terarec_t *local_data, int local_len,
     MPI_Comm_size(MPI_COMM_WORLD, &P);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // Allocate a single int buffer to be sliced into counts, displs, bucketIdx, pos
+    // Single large int buffer: sendCounts, recvCounts, sendDispl, recvDispl, bucketIdx, pos
+    int numSamples = P - 1;
     int total_ints = 4*P + local_len + P;
     int *shared_ints = malloc(total_ints * sizeof(int));
-    int *sendCounts  = shared_ints;
-    int *recvCounts  = shared_ints + P;
-    int *sendDispl   = shared_ints + 2*P;
-    int *recvDispl   = shared_ints + 3*P;
-    int *bucketIdx   = shared_ints + 4*P;
-    int *pos         = bucketIdx + local_len;  // last P entries
+    int *sendCounts = shared_ints;
+    int *recvCounts = sendCounts + P;
+    int *sendDispl  = recvCounts + P;
+    int *recvDispl  = sendDispl  + P;
+    int *bucketIdx  = recvDispl + P;
+    int *pos        = bucketIdx  + local_len;
 
-    // Allocate record buffers
+    // Buffers for data
     terarec_t *sendBuf      = malloc(local_len * sizeof(terarec_t));
-    int numSamples = P - 1;
     terarec_t *localSamples = malloc(numSamples * sizeof(terarec_t));
     terarec_t *splitters    = malloc(numSamples * sizeof(terarec_t));
-    terarec_t *globalSamples = (rank==0 ? malloc(P * numSamples * sizeof(terarec_t)) : NULL);
+    terarec_t *globalSamples = (rank==0)
+        ? malloc(P * numSamples * sizeof(terarec_t))
+        : NULL;
 
-    // 1. Sort own data locally
-    qsort(local_data, local_len, sizeof(terarec_t), teraCompare);
+    // 1. Radix-sort local data
+    radixSortRecords(local_data, local_len);
 
-    // 2. Select P-1 samples from local_data
+    // 2. Select P-1 samples
     for (int i = 0; i < numSamples; i++) {
         int idx = (i + 1) * local_len / P;
         if (idx >= local_len) idx = local_len - 1;
         localSamples[i] = local_data[idx];
     }
 
-    // 3. Gather samples at root
+    // 3. Gather samples
     MPI_Gather(localSamples, numSamples, mpi_tera_type,
                globalSamples, numSamples, mpi_tera_type,
                0, MPI_COMM_WORLD);
 
-    // 4. Sort global samples and pick splitters (root)
+    // 4. Radix-sort global samples & pick splitters on root
     if (rank == 0) {
-        qsort(globalSamples, P * numSamples, sizeof(terarec_t), teraCompare);
+        radixSortRecords(globalSamples, P * numSamples);
         for (int i = 1; i < P; i++)
             splitters[i-1] = globalSamples[i * numSamples];
     }
+    // 5. Broadcast splitters
     MPI_Bcast(splitters, numSamples, mpi_tera_type, 0, MPI_COMM_WORLD);
 
-    // 5. Partition local_data into P buckets
+    // 6. Partition into buckets
     memset(sendCounts, 0, P * sizeof(int));
     for (int i = 0; i < local_len; i++) {
         int b = 0;
@@ -59,22 +91,21 @@ void terasort(terarec_t *local_data, int local_len,
         sendCounts[b]++;
     }
 
-    // 6. Compute send displacements and pack sendBuf
+    // 7. Compute send displacements & pack
     sendDispl[0] = 0;
-    for (int i = 1; i < P; i++)
-        sendDispl[i] = sendDispl[i-1] + sendCounts[i-1];
+    for (int i = 1; i < P; i++) sendDispl[i] = sendDispl[i-1] + sendCounts[i-1];
     memcpy(pos, sendDispl, P * sizeof(int));
     for (int i = 0; i < local_len; i++) {
         int b = bucketIdx[i];
         sendBuf[pos[b]++] = local_data[i];
     }
 
-    // 7. Exchange bucket sizes
+    // 8. Exchange counts
     MPI_Alltoall(sendCounts, 1, MPI_INT,
                  recvCounts, 1, MPI_INT,
                  MPI_COMM_WORLD);
 
-    // 8. Compute recv displacements
+    // 9. Compute recv displacements
     recvDispl[0] = 0;
     int totalRecv = recvCounts[0];
     for (int i = 1; i < P; i++) {
@@ -82,17 +113,17 @@ void terasort(terarec_t *local_data, int local_len,
         totalRecv += recvCounts[i];
     }
 
-    // 9. Exchange data
+    // 10. Exchange data
     terarec_t *recvBuf = malloc(totalRecv * sizeof(terarec_t));
     MPI_Alltoallv(sendBuf, sendCounts, sendDispl, mpi_tera_type,
                   recvBuf, recvCounts, recvDispl, mpi_tera_type,
                   MPI_COMM_WORLD);
 
-    // 10. Final local sort
-    qsort(recvBuf, totalRecv, sizeof(terarec_t), teraCompare);
+    // 11. Final Radix-sort
+    radixSortRecords(recvBuf, totalRecv);
     *sortedData = recvBuf;
 
-    // 11. Gather final counts and compute global displacements
+    // 12. Gather final counts & compute global displs
     MPI_Allgather(&totalRecv, 1, MPI_INT,
                   sorted_counts, 1, MPI_INT,
                   MPI_COMM_WORLD);
