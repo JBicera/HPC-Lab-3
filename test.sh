@@ -9,13 +9,13 @@
 #SBATCH --error=job.%J.err
 #SBATCH --output=job.%J.out
 
-Setup Environment
+#Setup Environment
 cd $SLURM_SUBMIT_DIR
 source pace_env.sh
 
 make teragen terametrics
 
-List of test sizes (all ≥ 64 procs)
+#List of test sizes (all ≥ 64 procs)
 sizes=(64 67 69 125 2000 344230 78 1023 10000 16000000)
 
 for i in "${!sizes[@]}"
