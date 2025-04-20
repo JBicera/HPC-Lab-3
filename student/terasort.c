@@ -25,7 +25,7 @@ void terasort(terarec_t *local_data, int local_len,
     // 2. Select P - 1 Samples
     int numSamples = P - 1;
     terarec_t *samples = malloc(P * numSamples * sizeof(terarec_t));
-    // Fill local samples
+    // Evenly spaced samples from local sorted data
     for (int i = 0; i < numSamples; i++) 
     {
         int idx = (i + 1) * local_len / P;
@@ -42,6 +42,7 @@ void terasort(terarec_t *local_data, int local_len,
     // 4. Sort samples on root 
     if (rank == 0) 
     {
+        // Sort using quick sort
         qsort(samples, P * numSamples, sizeof(terarec_t), teraCompare);
         // 5. Select P - 1 Splitters
         for (int i = 1; i < P; i++)
@@ -53,7 +54,7 @@ void terasort(terarec_t *local_data, int local_len,
 
     // 7. Partition using splitters
     memset(sendCounts, 0, P * sizeof(int));
-    int *bucketIdx = malloc(local_len * sizeof(int));
+    int *bucketIdx = malloc(local_len * sizeof(int)); // Store bucekt index
     for (int i = 0; i < local_len; i++) 
     {
         int bucket = 0;
@@ -66,15 +67,13 @@ void terasort(terarec_t *local_data, int local_len,
     // Compute send displacements
     sendDispl[0] = 0;
     for (int i = 1; i < P; i++)
-        sendDispl[i] = sendDispl[i - 1] + sendCounts[i - 1];
+        sendDispl[i] = sendDispl[i - 1] + sendCounts[i - 1]; // Computer where each bucket should start
 
-    // Pack sendBuf
+    // Pack sendBuf according to buckets
     int *pos = malloc(P * sizeof(int));
     memcpy(pos, sendDispl, P * sizeof(int));
-    for (int i = 0; i < local_len; i++) {
-        int b = bucketIdx[i];
-        sendBuf[pos[b]++] = local_data[i];
-    }
+    for (int i = 0; i < local_len; i++) 
+        sendBuf[pos[bucketIdx[i]]++] = local_data[i];
 
     free(bucketIdx);
     free(pos);
@@ -85,8 +84,9 @@ void terasort(terarec_t *local_data, int local_len,
     // Compute recv displacements
     recvDispl[0] = 0;
     int totalRecv = recvCounts[0];
-    for (int i = 1; i < P; i++) {
-        recvDispl[i] = recvDispl[i - 1] + recvCounts[i - 1];
+    for (int i = 1; i < P; i++) 
+    {
+        recvDispl[i] = recvDispl[i - 1] + recvCounts[i - 1]; // Where incoming data from other ranks should be inside recvbuf
         totalRecv += recvCounts[i];
     }
 
@@ -109,9 +109,9 @@ void terasort(terarec_t *local_data, int local_len,
     MPI_Allgather(&totalRecv, 1, MPI_INT,
                   sorted_counts, 1, MPI_INT,
                   MPI_COMM_WORLD);
-    sorted_displs[0] = 0;
+    sorted_displs[0] = 0; 
     for (int i = 1; i < P; i++)
-        sorted_displs[i] = sorted_displs[i - 1] + sorted_counts[i - 1];
+        sorted_displs[i] = sorted_displs[i - 1] + sorted_counts[i - 1]; // Where each rank's data begins globally
 
     free(recvCounts);
     free(recvDispl);
