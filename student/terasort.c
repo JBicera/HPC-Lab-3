@@ -10,11 +10,11 @@ void terasort(terarec_t *local_data, int local_len,
     MPI_Comm_size(MPI_COMM_WORLD, &P);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // Allocate integer buffers
-    int *sendCounts = calloc(P, sizeof(int));    // bucket sizes for send
-    int *sendDispl  = malloc(P * sizeof(int));   // send offsets
-    int *recvCounts = malloc(P * sizeof(int));   // bucket sizes for recv
-    int *recvDispl  = malloc(P * sizeof(int));   // recv offsets
+    // Allocate integer buffers (Using stack is too small for the amount of data )
+    int *sendCounts = calloc(P, sizeof(int)); // Bucket sizes for send
+    int *sendDispl  = malloc(P * sizeof(int)); // Send offsets
+    int *recvCounts = malloc(P * sizeof(int)); // Bucket sizes for recv
+    int *recvDispl  = malloc(P * sizeof(int)); // Recv offsets
 
     // Buffer for packing outgoing records
     terarec_t *sendBuf = malloc(local_len * sizeof(terarec_t));
@@ -70,18 +70,18 @@ void terasort(terarec_t *local_data, int local_len,
         sendDispl[i] = sendDispl[i - 1] + sendCounts[i - 1]; // Computer where each bucket should start
 
     // Pack sendBuf according to buckets
-    int *pos = malloc(P * sizeof(int));
+    int *pos = malloc(P * sizeof(int)); // Tracks current position for each bucket
     memcpy(pos, sendDispl, P * sizeof(int));
     for (int i = 0; i < local_len; i++) 
         sendBuf[pos[bucketIdx[i]]++] = local_data[i];
-
     free(bucketIdx);
-    free(pos);
+    free(pos); // Free immediately after
 
-    // Exchange counts
+
+    // Exchange record counts with all processors
     MPI_Alltoall(sendCounts, 1, MPI_INT, recvCounts, 1, MPI_INT,MPI_COMM_WORLD);
 
-    // Compute recv displacements
+    // Compute recv displacements and total number of records to receive
     recvDispl[0] = 0;
     int totalRecv = recvCounts[0];
     for (int i = 1; i < P; i++) 
@@ -112,7 +112,8 @@ void terasort(terarec_t *local_data, int local_len,
     sorted_displs[0] = 0; 
     for (int i = 1; i < P; i++)
         sorted_displs[i] = sorted_displs[i - 1] + sorted_counts[i - 1]; // Where each rank's data begins globally
-
+    
+    // Cleanup the rest
     free(recvCounts);
     free(recvDispl);
     free(samples);
